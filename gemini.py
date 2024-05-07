@@ -5,7 +5,6 @@ $ pip install google-generativeai
 """
 
 from pathlib import Path
-import hashlib
 import google.generativeai as genai
 import json
 import csv
@@ -57,40 +56,42 @@ def compare_csvs(clean_dataset, test_dataset, cleaned_dataset):
     cleaned_reader = csv.reader(cleaned)
 
     tp = fp = tn = fn = 0
-    imputation_tp = imputation_fn = 0
+    correction_tp = correction_fn = 0
 
-    # Compare each row element by element
     for clean_row, test_row, cleaned_row in zip(clean_reader, test_reader, cleaned_reader):
       for clean_element, test_element, cleaned_element  in zip(clean_row, test_row, cleaned_row):
+        cleaned_element = cleaned_element.strip(" '")
         if clean_element != test_element: # actual error 
           if test_element != cleaned_element: # error detected            
-            tp += 1
+            tn += 1
             if clean_element == cleaned_element: # error corrected
-              imputation_tp += 1
-            else:
-              imputation_fn += 1
+              correction_tp += 1
+            else: # cleaned incorrectly
+              correction_fn += 1
           else: # error not detected
-            fn += 1
+            fp += 1
         else: # no error
           if clean_element == cleaned_element: # left unchanged
-            tn += 1
+            tp += 1
           else: # error detected incorrectly
-            # print(clean_element, cleaned_element)
-            fp += 1
+            fn += 1    
+            print("Clean: ", clean_element, "Test: ", test_element, "Cleaned: ", cleaned_element.strip(" '"))
+
 
     # error detection
     precision = tp / (tp+fp)
     recall = tp / (tp+fn)
-    # imputation
-    imputation_accuracy = (imputation_tp+tn)/(tp+tn+fn+fp)
+    # correction
+    correction_accuracy = (correction_tp+tp)/(tp+tn+fn+fp)
+    f1 = 2*(precision*recall)/(precision+recall)
     print('Error Detection: ')
     print(f'TP: {tp}, FP: {fp}, TN: {tn}, FN: {fn}')
     print("Precision: ", precision)
     print("Recall: ", recall)
-    print('Imputataion')
-    print('TP:', imputation_tp, 'FN:', imputation_fn)
-    print("Accuracy: ", imputation_accuracy)
-          
+    print('F1:', f1)
+    print('Correction')
+    print('TP:', correction_tp, 'FN:', correction_fn)
+    print("Accuracy: ", correction_accuracy)          
 
 def get_model_output(chat_start, test_dataset, cleaned_dataset, start_index):
   print(start_index)
@@ -108,13 +109,11 @@ def get_model_output(chat_start, test_dataset, cleaned_dataset, start_index):
 
   prompt = "for each row in the file,check if there is an error in the row and give a clean version of the row. ? always means an error and should be replaced"
   with open(test_dataset, "r") as f:
-      file_content = ''.join(f.readlines()[start_index:start_index+20]) #.split('\n')
+      file_content = ''.join(f.readlines()[start_index:start_index+10]) #.split('\n')
 
-  # print(file_content)
   prompt += file_content
 
   convo.send_message(prompt)
-  # print(convo.last.text)
 
   json_data = json.loads(convo.last.text)
 
@@ -125,14 +124,18 @@ def get_model_output(chat_start, test_dataset, cleaned_dataset, start_index):
 
 if __name__ == "__main__":
   data = 'adults'
-  data = 'hospital'
+  # data = 'hospital'
   folder = '../data_clean_datasets/datasets/'+data+'/'
   cleaned_dataset = data+'-cleaned.csv'
   test_dataset = data+"_dirty.csv"
   clean_dataset = data+"_clean.csv"
-  # chat_start = "Consider a dataset with the following columns: row_id,age,workclass,education,maritalstatus,occupation,relationship,race,sex,hoursperweek,country,income.\nHere are some examples of clean rows: 0,31-50,Private,Prof-school,Never-married,Prof-specialty,Not-in-family,White,Female,40,United-States,MoreThan50K \n1,>50,Private,HS-grad,Married-civ-spouse,Craft-repair,Husband,White,Male,16,United-States,LessThan50K \n2,>50,Private,Some-college,Married-civ-spouse,Exec-managerial,Husband,White,Male,55,United-States,MoreThan50K \n3,22-30,Private,HS-grad,Never-married,Handlers-cleaners,Own-child,White,Male,40,United-States,LessThan50K.\n\n Errors can be common typos on a qwerty keyboard, missing values and implicitly missing values ex: age = 0, as well as values replaced with values from other columns"
-  chat_start = "Consider a dataset with the following columns: ProviderNumber,HospitalName,Address1,Address2,Address3,City,State,ZipCode,CountyName,PhoneNumber,HospitalType,HospitalOwner,EmergencyService,Condition,MeasureCode,MeasureName,Score,Sample,Stateavg\nHere are some examples of clean rows:\n10018,callahan eye foundation hospital,1720 university blvd,,,birmingham,al,35233,jefferson,2053258100,acute care hospitals,voluntary non-profit - private,yes,surgical infection prevention,scip-card-2,surgery patients who were taking heart drugs called beta blockers before coming to the hospital who were kept on the beta blockers during the period just before and after their surgery,,,al_scip-card-2\n10018,callahan eye foundation hospital,1720 university blvd,,,birmingham,al,35233,jefferson,2053258100,acute care hospitals,voluntary non-profit - private,yes,surgical infection prevention,scip-inf-1,surgery patients who were given an antibiotic at the right time (within one hour before surgery) to help prevent infection,,,al_scip-inf-1\n10018,callahan eye foundation hospital,1720 university blvd,,,birmingham,al,35233,jefferson,2053258100,acute care hospitals,voluntary non-profit - private,yes,surgical infection prevention,scip-inf-2,surgery patients who were given the  right kind  of antibiotic to help prevent infection,,,al_scip-inf-2\n10018,callahan eye foundation hospital,1720 university blvd,,,birmingham,al,35233,jefferson,2053258100,acute care hospitals,voluntary non-profit - private,yes,surgical infection prevention,scip-inf-3,surgery patients whose preventive antibiotics were stopped at the right time (within 24 hours after surgery),,,al_scip-inf-3\n\nfor each row of the following rows, check if there is an error in the row and give a clean version of the row.\n10018,callahan eye foundation hospital,1720 university blvd,,,birmingham,al,35233,jefferson,2053258100,acute care hospitals,voluntary non-profit - private,yes,surgical infection prevention,scip-card-2,surgery patients who were taking heart drugs caxxed beta bxockers before coming to the hospitax who were kept on the beta bxockers during the period just before and after their surgery,,,al_scip-card-2\n10018,callahan eye foundation hospital,1720 university blvd,,,birmingham,al,35233,jefferson,2053258100,acute care hospitals,voluntary non-profit - private,yes,surgical infection prevention,scip-inf-1,surgery patients who were given an antibiotic at the right time (within one hour before surgery) to help prevent infection,,,al_scip-inf-1\n10018,callahan eye foundation hospital,1720 university blvd,,,birmingham,al,35233,jefferson,2053258100,acute care hospitals,voluntary non-profit - private,yes,surgical infection prevention,scip-inf-2,surgery patients who were given the  right kind  of antibiotic to help prevent infection,,,al_scip-inf-2\n10018,callahan eye foundation hospital,1720 university blvd,,,birminghxm,al,35233,jefferson,2053258100,acute care hospitals,voluntary non-profit - private,yes,surgical infection prevention,scip-inf-3,surgery patients whose preventive antibiotics were stopped at the right time (within 24 hours after surgery),,,al_scip-inf-3\n10018,callahan eye foundation hospital,1720 university blvd,,,birmingham,al,35233,jefferson,2053258100,acute care hospitals,voluntary non-profit - private,yes,surgical infection prevention,scip-inf-4,all heart surgery patients whose blood sugar (blood glucose) is kept under good control in the days right after surgery,,,al_scip-inf-4n\n Errors can be common typos on a qwerty keyboard, missing values and implicitly missing values ex: age = 0, as well as values replaced with values from other columns"
+  chat_start = "Consider a dataset with the following columns: row_id,age,workclass,education,maritalstatus,occupation,relationship,race,sex,hoursperweek,country,income.\nHere are some examples of clean rows: 0,31-50,Private,Prof-school,Never-married,Prof-specialty,Not-in-family,White,Female,40,United-States,MoreThan50K \n1,>50,Private,HS-grad,Married-civ-spouse,Craft-repair,Husband,White,Male,16,United-States,LessThan50K \n2,>50,Private,Some-college,Married-civ-spouse,Exec-managerial,Husband,White,Male,55,United-States,MoreThan50K \n3,22-30,Private,HS-grad,Never-married,Handlers-cleaners,Own-child,White,Male,40,United-States,LessThan50K.\n\n Errors can be common typos on a qwerty keyboard, missing values and implicitly missing values ex: age = 0, as well as values replaced with values from other columns"
+  # chat_start = "Consider a dataset with the following columns: ProviderNumber,HospitalName,Address1,Address2,Address3,City,State,ZipCode,CountyName,PhoneNumber,HospitalType,HospitalOwner,EmergencyService,Condition,MeasureCode,MeasureName,Score,Sample,Stateavg\nHere are some examples of clean rows:\n10018,callahan eye foundation hospital,1720 university blvd,,,birmingham,al,35233,jefferson,2053258100,acute care hospitals,voluntary non-profit - private,yes,surgical infection prevention,scip-card-2,surgery patients who were taking heart drugs called beta blockers before coming to the hospital who were kept on the beta blockers during the period just before and after their surgery,,,al_scip-card-2\n10018,callahan eye foundation hospital,1720 university blvd,,,birmingham,al,35233,jefferson,2053258100,acute care hospitals,voluntary non-profit - private,yes,surgical infection prevention,scip-inf-1,surgery patients who were given an antibiotic at the right time (within one hour before surgery) to help prevent infection,,,al_scip-inf-1\n10018,callahan eye foundation hospital,1720 university blvd,,,birmingham,al,35233,jefferson,2053258100,acute care hospitals,voluntary non-profit - private,yes,surgical infection prevention,scip-inf-2,surgery patients who were given the  right kind  of antibiotic to help prevent infection,,,al_scip-inf-2\n10018,callahan eye foundation hospital,1720 university blvd,,,birmingham,al,35233,jefferson,2053258100,acute care hospitals,voluntary non-profit - private,yes,surgical infection prevention,scip-inf-3,surgery patients whose preventive antibiotics were stopped at the right time (within 24 hours after surgery),,,al_scip-inf-3\n\nfor each row of the following rows, check if there is an error in the row and give a clean version of the row.\n10018,callahan eye foundation hospital,1720 university blvd,,,birmingham,al,35233,jefferson,2053258100,acute care hospitals,voluntary non-profit - private,yes,surgical infection prevention,scip-card-2,surgery patients who were taking heart drugs caxxed beta bxockers before coming to the hospitax who were kept on the beta bxockers during the period just before and after their surgery,,,al_scip-card-2\n10018,callahan eye foundation hospital,1720 university blvd,,,birmingham,al,35233,jefferson,2053258100,acute care hospitals,voluntary non-profit - private,yes,surgical infection prevention,scip-inf-1,surgery patients who were given an antibiotic at the right time (within one hour before surgery) to help prevent infection,,,al_scip-inf-1\n10018,callahan eye foundation hospital,1720 university blvd,,,birmingham,al,35233,jefferson,2053258100,acute care hospitals,voluntary non-profit - private,yes,surgical infection prevention,scip-inf-2,surgery patients who were given the  right kind  of antibiotic to help prevent infection,,,al_scip-inf-2\n10018,callahan eye foundation hospital,1720 university blvd,,,birminghxm,al,35233,jefferson,2053258100,acute care hospitals,voluntary non-profit - private,yes,surgical infection prevention,scip-inf-3,surgery patients whose preventive antibiotics were stopped at the right time (within 24 hours after surgery),,,al_scip-inf-3\n10018,callahan eye foundation hospital,1720 university blvd,,,birmingham,al,35233,jefferson,2053258100,acute care hospitals,voluntary non-profit - private,yes,surgical infection prevention,scip-inf-4,all heart surgery patients whose blood sugar (blood glucose) is kept under good control in the days right after surgery,,,al_scip-inf-4n\n Errors can be common typos on a qwerty keyboard, missing values and implicitly missing values ex: age = 0, as well as values replaced with values from other columns"
 
-  [get_model_output(chat_start, folder+test_dataset, cleaned_dataset, i) for i in range(0, 1000, 20)]
+  # chat_start_zero = "Consider a dataset with the following columns: row_id,age,workclass,education,maritalstatus,occupation,relationship,race,sex,hoursperweek,country,income.\n Errors can be common typos on a qwerty keyboard, missing values and implicitly missing values ex: age = 0, as well as values replaced with values from other columns"
+  # chat_start_zero = "Consider a dataset with the following columns: ProviderNumber,HospitalName,Address1,Address2,Address3,City,State,ZipCode,CountyName,PhoneNumber,HospitalType,HospitalOwner,EmergencyService,Condition,MeasureCode,MeasureName,Score,Sample,Stateavg\n Errors can be common typos on a qwerty keyboard, missing values and implicitly missing values ex: age = 0, as well as values replaced with values from other columns"
+
+
+  [get_model_output(chat_start, folder+test_dataset, cleaned_dataset, i) for i in range(0, 1000, 10)]
   
   compare_csvs(folder+clean_dataset, folder+test_dataset, cleaned_dataset)
